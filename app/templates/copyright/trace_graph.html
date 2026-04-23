@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}引用溯源图谱{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h4 class="mb-0">引用溯源图谱：#{{ copyright.id }} {{ copyright.title }}</h4>
+        <a href="{{ url_for('copyright.detail', id=copyright.id) }}" class="btn btn-sm btn-outline-primary">返回详情</a>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-light border mb-3">
+            节点表示作品，箭头方向为“引用方 -> 被引用方”。蓝色节点为当前作品。
+        </div>
+        <div id="traceNetwork" style="height: 650px; border: 1px solid #dee2e6; border-radius: 8px;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script>
+async function renderTraceGraph() {
+    const container = document.getElementById('traceNetwork');
+    try {
+        const resp = await fetch("{{ url_for('copyright.trace', copyright_id=copyright.id) }}");
+        const data = await resp.json();
+        if (!resp.ok) {
+            container.innerHTML = `<div class="p-3 text-danger">加载失败：${data.error || '未知错误'}</div>`;
+            return;
+        }
+
+        const nodes = data.nodes.map(n => ({
+            id: n.id,
+            label: `#${n.id}\n${n.title}`,
+            color: n.id === data.root.id ? '#0d6efd' : '#198754',
+            font: { color: '#ffffff' },
+            shape: 'dot',
+            size: n.id === data.root.id ? 26 : 18
+        }));
+
+        const edges = data.edges.map(e => ({
+            from: e.source,
+            to: e.target,
+            arrows: 'to',
+            color: '#6c757d',
+            smooth: { type: 'cubicBezier' }
+        }));
+
+        const network = new vis.Network(
+            container,
+            { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
+            {
+                layout: { improvedLayout: true },
+                physics: {
+                    barnesHut: {
+                        gravitationalConstant: -6000,
+                        springLength: 180,
+                        springConstant: 0.03
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    dragNodes: true,
+                    zoomView: true
+                }
+            }
+        );
+
+        network.on('doubleClick', function(params) {
+            if (!params.nodes.length) return;
+            const id = params.nodes[0];
+            window.location.href = `/copyright/${id}`;
+        });
+    } catch (err) {
+        container.innerHTML = `<div class="p-3 text-danger">加载失败：${err.message}</div>`;
+    }
+}
+
+renderTraceGraph();
+</script>
+{% endblock %}

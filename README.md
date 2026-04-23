@@ -196,6 +196,25 @@ python run.py
 
 启动后访问：`http://localhost:5000`
 
+### 8.4 切换到 Fabric 后端
+
+默认账本后端为本地链（`LEDGER_BACKEND=local`）。  
+如果你已经部署了 Fabric 网关服务，可在 `config.py` 中改为：
+
+```python
+LEDGER_BACKEND = 'fabric'
+FABRIC_GATEWAY_URL = 'http://127.0.0.1:4000'
+FABRIC_CHANNEL = 'mychannel'
+FABRIC_CHAINCODE = 'copyright_cc'
+```
+
+当前集成方式通过 HTTP 网关调用 Fabric，约定接口：
+
+- `POST /invoke`：提交交易（批量）
+- `GET /blocks`：查询区块列表
+
+如果你的网关路径或参数不同，只需在 `app/services/ledger.py` 的 `FabricLedgerBackend` 中调整映射即可。
+
 ## 9. 安全与边界说明
 
 - 当前实现用于教学/课程/原型验证，非生产级联盟链

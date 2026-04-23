@@ -1,98 +1,80 @@
-from flask import Blueprint, render_template, jsonify
-from app.models.blockchain import blockchain, Block
-from app.models.copyright import Copyright
-from app import db
+from flask import Blueprint, jsonify, render_template
 
-# 创建一个名为'blockchain'的蓝图，用于处理区块链相关的路由
+from app import db
+from app.models.block import Block
+from app.models.blockchain import blockchain
+from app.models.copyright import Copyright
+from app.services.ledger import get_blocks
+
 bp = Blueprint('blockchain', __name__, url_prefix='/blockchain')
 
+
 def sync_blockchain_with_db():
-    """同步数据库中的版权记录到区块链"""
-    # 如果区块链只有创世区块，则需要同步
-    if len(blockchain.chain) <= 1:
-        # 获取所有已确认的版权记录
-        copyrights = Copyright.query.filter_by(status='confirmed').order_by(Copyright.timestamp).all()
-        
-        for copyright in copyrights:
-            # 将版权信息添加到区块链
-            transaction = copyright.to_dict()
-            blockchain.add_transaction(transaction)
-            
-            # 使用原始时间戳创建区块
-            timestamp = copyright.timestamp.timestamp()  # 转换为 UNIX 时间戳
-            block = Block(
-                index=len(blockchain.chain),
-                transactions=blockchain.pending_transactions,
-                timestamp=timestamp,  # 使用原始时间戳
-                previous_hash=blockchain.get_latest_block().hash
-            )
-            
-            # 挖矿
-            block.mine_block(blockchain.difficulty)
-            blockchain.chain.append(block)
-            blockchain.pending_transactions = []
-            
-            # 更新数据库中的区块哈希
-            copyright.block_hash = block.hash
-            db.session.commit()
+    # Fabric 模式下由网关提供链数据，不执行本地同步。
+    if len(blockchain.chain) > 1:
+        return
+
+    copyrights = Copyright.query.filter_by(status='confirmed').order_by(Copyright.timestamp).all()
+    for item in copyrights:
+        transaction = item.to_dict()
+        blockchain.add_transaction(transaction)
+
+        block = Block(
+            index=len(blockchain.chain),
+            transactions=blockchain.pending_transactions,
+            timestamp=item.timestamp.timestamp(),
+            previous_hash=blockchain.get_latest_block().hash,
+        )
+        block.mine_block(blockchain.difficulty)
+        blockchain.chain.append(block)
+        blockchain.pending_transactions = []
+
+        item.block_hash = block.hash
+        db.session.commit()
+
 
 @bp.route('/explorer')
 def explorer():
-    """区块链浏览器主页"""
-    # 确保区块链与数据库同步
     sync_blockchain_with_db()
-    
-    # 将区块链中的区块信息转换为字典列表，用于在模板中显示
-    blocks = [{
-        'index': block.index,
-        'hash': block.hash,
-        'previous_hash': block.previous_hash,
-        'timestamp': block.timestamp,
-        'transactions': len(block.transactions)
-    } for block in blockchain.chain]
-    
-    return render_template('blockchain/explorer.html', blocks=blocks)
+    blocks = get_blocks()
+    block_cards = [
+        {
+            'index': block.get('index', 0),
+            'hash': block.get('hash', ''),
+            'previous_hash': block.get('previous_hash', ''),
+            'timestamp': block.get('timestamp', 0),
+            'transactions': len(block.get('transactions', [])),
+        }
+        for block in blocks
+    ]
+    return render_template('blockchain/explorer.html', blocks=block_cards)
+
 
 @bp.route('/api/blocks')
-def get_blocks():
-    """获取所有区块的API"""
-    # 将区块链中的区块信息转换为字典列表，用于API返回
-    blocks = [{
-        'index': block.index,
-        'hash': block.hash,
-        'previous_hash': block.previous_hash,
-        'timestamp': block.timestamp,
-        'transactions': block.transactions
-    } for block in blockchain.chain]
-    return jsonify(blocks)
+def api_blocks():
+    return jsonify(get_blocks())
+
 
 @bp.route('/api/block/<int:index>')
-def get_block(index):
-    """获取特定区块的API"""
-    if index < len(blockchain.chain):
-        block = blockchain.chain[index]
-        # 将特定区块的信息转换为字典，用于API返回
-        return jsonify({
-            'index': block.index,
-            'hash': block.hash,
-            'previous_hash': block.previous_hash,
-            'timestamp': block.timestamp,
-            'transactions': block.transactions
-        })
-    return jsonify({'error': '区块不存在'}), 404
+def api_block(index):
+    blocks = get_blocks()
+    if index < 0 or index >= len(blocks):
+        return jsonify({'error': '区块不存在'}), 404
+    return jsonify(blocks[index])
+
 
 @bp.route('/block/<int:index>')
 def block_detail(index):
-    """区块详情页面"""
-    if index < len(blockchain.chain):
-        block = blockchain.chain[index]
-        # 将区块信息转换为字典，用于在模板中显示
-        block_data = {
-            'index': block.index,
-            'hash': block.hash,
-            'previous_hash': block.previous_hash,
-            'timestamp': block.timestamp,
-            'transactions': block.transactions
-        }
-        return render_template('blockchain/block_detail.html', block=block_data)
-    return render_template('errors/404.html'), 404
+    blocks = get_blocks()
+    if index < 0 or index >= len(blocks):
+        return jsonify({'error': '区块不存在'}), 404
+
+    block = blocks[index]
+    block_data = {
+        'index': block.get('index', 0),
+        'hash': block.get('hash', ''),
+        'previous_hash': block.get('previous_hash', ''),
+        'timestamp': block.get('timestamp', 0),
+        'transactions': block.get('transactions', []),
+    }
+    return render_template('blockchain/block_detail.html', block=block_data)

@@ -89,5 +89,6 @@
 <a href="{{ url_for('contract.initiate_transfer', copyright_id=copyright.id) }}" class="btn btn-primary mt-3">转让版权</a>
 {% endif %}
 <a href="{{ url_for('contract.verify_owner', copyright_id=copyright.id) }}" class="btn btn-info mt-3">验证所有权</a>
+<a href="{{ url_for('copyright.trace_graph', copyright_id=copyright.id) }}" class="btn btn-success mt-3">引用溯源图谱</a>
 <a href="{{ url_for('copyright.trace', copyright_id=copyright.id) }}" class="btn btn-outline-secondary mt-3" target="_blank">查看溯源API</a>
 {% endblock %}

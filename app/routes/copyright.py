@@ -2,14 +2,14 @@ from datetime import datetime
 import hashlib
 import os
 
-from flask import Blueprint, render_template, request, jsonify, current_app
-from flask_login import login_required, current_user
+from flask import Blueprint, current_app, jsonify, render_template, request
+from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 
 from app import db
-from app.models.blockchain import blockchain
 from app.models.copyright import Copyright
 from app.models.reference import CopyrightReference
+from app.services.ledger import commit_transactions
 
 bp = Blueprint('copyright', __name__)
 
@@ -136,90 +136,89 @@ def upload():
         if file.filename == '':
             return jsonify({'error': '未选择文件'}), 400
 
-        if file and allowed_file(file.filename):
-            try:
-                upload_folder = ensure_upload_folder()
+        if not file or not allowed_file(file.filename):
+            return jsonify({'error': '不支持的文件类型'}), 400
 
-                filename = secure_filename(file.filename)
-                file_path = os.path.join(upload_folder, filename)
-                file.save(file_path)
+        try:
+            upload_folder = ensure_upload_folder()
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(upload_folder, filename)
+            file.save(file_path)
 
-                with open(file_path, 'rb') as f:
-                    content = f.read()
-                    content_hash = hashlib.sha256(content).hexdigest()
+            with open(file_path, 'rb') as f:
+                content = f.read()
+                content_hash = hashlib.sha256(content).hexdigest()
 
-                reference_ids = parse_reference_ids(request.form.get('reference_ids', ''))
+            reference_ids = parse_reference_ids(request.form.get('reference_ids', ''))
 
-                copyright_record = Copyright(
-                    title=request.form['title'],
-                    description=request.form['description'],
-                    content_hash=content_hash,
-                    user_id=current_user.id,
-                    timestamp=datetime.utcnow(),
+            copyright_record = Copyright(
+                title=request.form['title'],
+                description=request.form['description'],
+                content_hash=content_hash,
+                user_id=current_user.id,
+                timestamp=datetime.utcnow(),
+            )
+
+            db.session.add(copyright_record)
+            db.session.flush()
+
+            if copyright_record.id in reference_ids:
+                return jsonify({'error': '不允许引用自己'}), 400
+
+            if reference_ids:
+                existing_targets = Copyright.query.filter(Copyright.id.in_(reference_ids)).all()
+                existing_target_ids = {item.id for item in existing_targets}
+                missing_ids = [str(ref_id) for ref_id in reference_ids if ref_id not in existing_target_ids]
+                if missing_ids:
+                    return jsonify({'error': f'无效的引用ID: {",".join(missing_ids)}'}), 400
+
+            transactions = [copyright_record.to_dict()]
+
+            pending_reference_records = []
+            for target_id in reference_ids:
+                evidence_seed = f'{content_hash}:{copyright_record.id}:{target_id}'
+                evidence_hash = hashlib.sha256(evidence_seed.encode('utf-8')).hexdigest()
+                relation = CopyrightReference(
+                    source_id=copyright_record.id,
+                    target_id=target_id,
+                    relation_type='quote',
+                    evidence_hash=evidence_hash,
                 )
+                db.session.add(relation)
+                pending_reference_records.append(relation)
 
-                db.session.add(copyright_record)
-                db.session.flush()
-
-                if copyright_record.id in reference_ids:
-                    return jsonify({'error': '不允许引用自己'}), 400
-
-                if reference_ids:
-                    existing_targets = Copyright.query.filter(Copyright.id.in_(reference_ids)).all()
-                    existing_target_ids = {item.id for item in existing_targets}
-                    missing_ids = [str(ref_id) for ref_id in reference_ids if ref_id not in existing_target_ids]
-                    if missing_ids:
-                        return jsonify({'error': f'无效的引用ID: {",".join(missing_ids)}'}), 400
-
-                blockchain.add_transaction(copyright_record.to_dict())
-
-                pending_reference_records = []
-                for target_id in reference_ids:
-                    evidence_seed = f'{content_hash}:{copyright_record.id}:{target_id}'
-                    evidence_hash = hashlib.sha256(evidence_seed.encode('utf-8')).hexdigest()
-                    relation = CopyrightReference(
-                        source_id=copyright_record.id,
-                        target_id=target_id,
-                        relation_type='quote',
-                        evidence_hash=evidence_hash,
-                    )
-                    db.session.add(relation)
-                    pending_reference_records.append(relation)
-
-                    blockchain.add_transaction(
-                        {
-                            'type': 'copyright_reference',
-                            'source_id': copyright_record.id,
-                            'target_id': target_id,
-                            'evidence_hash': evidence_hash,
-                            'timestamp': datetime.utcnow().timestamp(),
-                        }
-                    )
-
-                block = blockchain.mine_pending_transactions(current_user.username)
-                copyright_record.block_hash = block.hash
-                copyright_record.status = 'confirmed'
-                for relation in pending_reference_records:
-                    relation.block_hash = block.hash
-
-                db.session.commit()
-                return jsonify(
+                transactions.append(
                     {
-                        'success': True,
-                        'copyright_id': copyright_record.id,
-                        'references_created': len(pending_reference_records),
-                        'message': '上传成功',
+                        'type': 'copyright_reference',
+                        'source_id': copyright_record.id,
+                        'target_id': target_id,
+                        'evidence_hash': evidence_hash,
+                        'timestamp': datetime.utcnow().timestamp(),
                     }
                 )
-            except ValueError as ex:
-                db.session.rollback()
-                return jsonify({'error': str(ex)}), 400
-            except Exception as ex:
-                db.session.rollback()
-                current_app.logger.error(f'Upload error: {str(ex)}')
-                return jsonify({'error': f'上传失败: {str(ex)}'}), 500
 
-        return jsonify({'error': '不支持的文件类型'}), 400
+            block = commit_transactions(transactions, current_user.username)
+            copyright_record.block_hash = block['hash']
+            copyright_record.status = 'confirmed'
+            for relation in pending_reference_records:
+                relation.block_hash = block['hash']
+
+            db.session.commit()
+            return jsonify(
+                {
+                    'success': True,
+                    'copyright_id': copyright_record.id,
+                    'references_created': len(pending_reference_records),
+                    'message': '上传成功',
+                }
+            )
+        except ValueError as ex:
+            db.session.rollback()
+            return jsonify({'error': str(ex)}), 400
+        except Exception as ex:
+            db.session.rollback()
+            current_app.logger.error(f'Upload error: {str(ex)}')
+            return jsonify({'error': f'上传失败: {str(ex)}'}), 500
 
     latest_copyrights = Copyright.query.order_by(Copyright.timestamp.desc()).limit(20).all()
     return render_template('copyright/upload.html', latest_copyrights=latest_copyrights)
@@ -272,3 +271,9 @@ def trace(copyright_id):
     if not trace_data:
         return jsonify({'error': '版权记录不存在'}), 404
     return jsonify(trace_data)
+
+
+@bp.route('/trace/<int:copyright_id>/graph')
+def trace_graph(copyright_id):
+    copyright_record = Copyright.query.get_or_404(copyright_id)
+    return render_template('copyright/trace_graph.html', copyright=copyright_record)
