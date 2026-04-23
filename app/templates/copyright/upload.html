@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}上传作品{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">上传新作品</h4>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm" method="post" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="title" class="form-label">作品标题</label>
+                        <input type="text" class="form-control" id="title" name="title" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="description" class="form-label">作品描述</label>
+                        <textarea class="form-control" id="description" name="description" rows="4" required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="file" class="form-label">选择文件</label>
+                        <input type="file" class="form-control" id="file" name="file" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reference_ids" class="form-label">引用作品ID（可选）</label>
+                        <input type="text" class="form-control" id="reference_ids" name="reference_ids" placeholder="例如：1,2,15">
+                        <div class="form-text">填写已存在的版权ID，多个用英文逗号分隔。</div>
+                    </div>
+                    {% if latest_copyrights %}
+                    <div class="alert alert-light border">
+                        <strong>最近作品</strong>
+                        <div class="mt-2 small">
+                            {% for item in latest_copyrights %}
+                            <span class="badge bg-secondary me-1 mb-1">#{{ item.id }} {{ item.title }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary" id="submitBtn">上传并登记版权</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('uploadForm').onsubmit = function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '处理中...';
+
+    fetch("{{ url_for('copyright.upload') }}", {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = "{{ url_for('copyright.index') }}";
+        } else {
+            alert(data.error || '上传失败');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '上传并登记版权';
+        }
+    })
+    .catch(() => {
+        alert('上传失败，请重试');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '上传并登记版权';
+    });
+};
+</script>
+{% endblock %}

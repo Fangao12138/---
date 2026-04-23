@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{{ copyright.title }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="mb-0">{{ copyright.title }}</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-8">
+                <h5>作品信息</h5>
+                <p>{{ copyright.description }}</p>
+                <hr>
+                <div class="mb-3">
+                    <strong>作者：</strong> {{ copyright.author.username }}<br>
+                    <strong>登记时间：</strong> {{ copyright.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}<br>
+                    <strong>状态：</strong>
+                    <span class="badge bg-{{ 'success' if copyright.status == 'confirmed' else 'warning' }}">
+                        {{ '已确认' if copyright.status == 'confirmed' else '待确认' }}
+                    </span>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <h5>区块链信息</h5>
+                <div class="mb-3">
+                    <strong>内容哈希：</strong>
+                    <div class="text-break">
+                        <small>{{ copyright.content_hash }}</small>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <strong>区块哈希：</strong>
+                    <div class="text-break">
+                        <small>{{ copyright.block_hash }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <hr>
+        <div class="row">
+            <div class="col-md-6">
+                <h5>引用来源（本作品引用了谁）</h5>
+                {% if outgoing_refs %}
+                <ul class="list-group">
+                    {% for ref in outgoing_refs %}
+                    {% set target = target_map.get(ref.target_id) %}
+                    <li class="list-group-item">
+                        {% if target %}
+                        <a href="{{ url_for('copyright.detail', id=target.id) }}">#{{ target.id }} {{ target.title }}</a>
+                        {% else %}
+                        #{{ ref.target_id }}（记录缺失）
+                        {% endif %}
+                        <div class="small text-muted text-break">引用上链区块：{{ ref.block_hash }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">暂无引用来源</p>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                <h5>被引用记录（谁引用了本作品）</h5>
+                {% if incoming_refs %}
+                <ul class="list-group">
+                    {% for ref in incoming_refs %}
+                    {% set source = source_map.get(ref.source_id) %}
+                    <li class="list-group-item">
+                        {% if source %}
+                        <a href="{{ url_for('copyright.detail', id=source.id) }}">#{{ source.id }} {{ source.title }}</a>
+                        {% else %}
+                        #{{ ref.source_id }}（记录缺失）
+                        {% endif %}
+                        <div class="small text-muted text-break">引用上链区块：{{ ref.block_hash }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">暂无被引用记录</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if current_user.is_authenticated and copyright.user_id == current_user.id %}
+<a href="{{ url_for('contract.initiate_transfer', copyright_id=copyright.id) }}" class="btn btn-primary mt-3">转让版权</a>
+{% endif %}
+<a href="{{ url_for('contract.verify_owner', copyright_id=copyright.id) }}" class="btn btn-info mt-3">验证所有权</a>
+<a href="{{ url_for('copyright.trace', copyright_id=copyright.id) }}" class="btn btn-outline-secondary mt-3" target="_blank">查看溯源API</a>
+{% endblock %}
